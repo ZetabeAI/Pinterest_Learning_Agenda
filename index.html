@@ -127,6 +127,8 @@ body{display:flex;min-height:100vh}
 .mrow .mdot{width:7px;height:7px;border-radius:2px;flex-shrink:0}
 .mrow .mval{font-weight:600;font-variant-numeric:tabular-nums}
 .lift-pos{color:var(--green)}.lift-neg{color:var(--accent)}
+.taxo-tag{font-family:'JetBrains Mono',monospace;font-size:9.5px;font-weight:600;padding:2px 7px;border-radius:6px;background:var(--canvas);border:1px solid var(--line);color:var(--muted)}
+.taxo-tag.obj{background:var(--accent-soft);border-color:#F8CDD5;color:#9A0418}
 
 /* ===== CAMPAIGN CARDS ===== */
 .camp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:16px}
@@ -228,6 +230,7 @@ tbody tr:last-child td{border-bottom:none}
     <button class="nav-item active" data-view="overview"><span class="nav-dot"></span>Vista general</button>
     <button class="nav-item" data-view="markets"><span class="nav-dot"></span>Por mercado</button>
     <button class="nav-item" data-view="campaigns"><span class="nav-dot"></span>Por Campaign ID</button>
+    <button class="nav-item" data-view="taxonomy"><span class="nav-dot"></span>Formato y objetivo</button>
     <button class="nav-item" data-view="table"><span class="nav-dot"></span>Tabla dinámica</button>
     <div class="nav-label" style="margin-top:10px">Datos</div>
     <button class="nav-item" data-view="data"><span class="nav-dot"></span>Fuentes y carga</button>
@@ -260,6 +263,7 @@ tbody tr:last-child td{border-bottom:none}
       <button class="vtab active" data-view="overview">General</button>
       <button class="vtab" data-view="markets">Mercado</button>
       <button class="vtab" data-view="campaigns">Campaign ID</button>
+      <button class="vtab" data-view="taxonomy">Formato/Obj.</button>
       <button class="vtab" data-view="table">Tabla</button>
       <button class="vtab" data-view="data">Datos</button>
     </div>
@@ -280,6 +284,15 @@ tbody tr:last-child td{border-bottom:none}
         </div>
         <div class="fselect">
           <select id="marketFilter"><option value="">Todos los mercados</option></select>
+        </div>
+        <div class="fselect">
+          <select id="objetivoFilter"><option value="">Todos los objetivos</option></select>
+        </div>
+        <div class="fselect">
+          <select id="formatoFilter"><option value="">Todos los formatos</option></select>
+        </div>
+        <div class="fselect">
+          <select id="tipoFilter"><option value="">Todos los tipos</option></select>
         </div>
         <div class="fselect">
           <select id="matchFilter">
@@ -328,6 +341,35 @@ tbody tr:last-child td{border-bottom:none}
       <div id="unmatchedNote"></div>
       <div class="camp-grid" id="campGrid"></div>
       <div style="text-align:center;margin-top:24px" id="campMoreWrap"></div>
+    </section>
+
+    <!-- ===== TAXONOMY ===== -->
+    <section class="view" id="view-taxonomy">
+      <div class="section-note"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h10M4 17h7"/></svg>Formato, objetivo y tipo de campaña extraídos automáticamente de la taxonomía del nombre (ej. <b style="margin:0 3px" class="mono">…PINTEREST-VPIN…SOCIAL-MED…REACH…</b>).</div>
+      <div class="grid-2">
+        <div class="panel">
+          <div class="panel-head"><div class="panel-title">Impresiones por objetivo</div><div class="panel-meta" id="taxoObjMeta"></div></div>
+          <div class="panel-body"><div class="chart-wrap"><canvas id="chartObjetivo"></canvas></div></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><div class="panel-title">Impresiones por formato</div><div class="panel-meta">Top formatos</div></div>
+          <div class="panel-body"><div class="chart-wrap"><canvas id="chartFormato"></canvas></div></div>
+        </div>
+      </div>
+      <div class="panel" style="margin-bottom:18px">
+        <div class="panel-head"><div class="panel-title">Desglose por objetivo</div><div class="panel-meta">Clic en una fila para filtrar</div></div>
+        <div class="table-scroll"><table><thead><tr id="taxoObjHead"></tr></thead><tbody id="taxoObjBody"></tbody></table></div>
+      </div>
+      <div class="grid-2">
+        <div class="panel">
+          <div class="panel-head"><div class="panel-title">Desglose por formato</div><div class="panel-meta">Clic para filtrar</div></div>
+          <div class="table-scroll"><table><thead><tr id="taxoFmtHead"></tr></thead><tbody id="taxoFmtBody"></tbody></table></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><div class="panel-title">Desglose por tipo de campaña</div><div class="panel-meta">Clic para filtrar</div></div>
+          <div class="table-scroll"><table><thead><tr id="taxoTipoHead"></tr></thead><tbody id="taxoTipoBody"></tbody></table></div>
+        </div>
+      </div>
     </section>
 
     <!-- ===== TABLE ===== -->
@@ -393,7 +435,7 @@ let charts = {};
 let tableSort = {key:'impressions', dir:-1};
 let tablePage = 1; const PAGE_SIZE = 25;
 let campLimit = 24;
-const filters = {q:'', year:'', market:'', match:'', bu:''};
+const filters = {q:'', year:'', market:'', match:'', bu:'', objetivo:'', formato:'', tipo:''};
 
 /* IIEE for a campaign respecting the year filter */
 function iieeFor(c){ return filters.year ? (c.iieeByYear[filters.year]||0) : c.iieeWeekly; }
@@ -416,6 +458,20 @@ function parseCampaignIds(val){
   if(typeof val==='number')return [Math.trunc(val)];
   const nums=String(val).match(/\d{6,}/g);
   return nums?nums.map(n=>parseInt(n,10)):[];
+}
+/* Extract formato (seg 3), objetivo (known vocab), tipo (segment before scope token) from taxonomy */
+const OBJ_VOCAB = new Set(['REACH','TRAF','TRAFFIC','VIEWS','VIEW','CONS','AWAR','AWARENESS','AW','ENG','ENGAGEMENT','CONV','CONVERSION','CLICKS','LEADS','SALES','TXS','SELL']);
+const SCOPE_VOCAB = new Set(['ALL','ALLA','ALLB','ALLC','ALLS','USUARIOS']);
+function parseTaxonomy(name){
+  if(!name) return {formato:null,tipo:null,objetivo:null};
+  const segs=String(name).split('_');
+  const formato = segs.length>2 ? segs[2] : null;
+  let objetivo=null;
+  for(const s of segs){ if(OBJ_VOCAB.has(s.toUpperCase())){objetivo=s.toUpperCase();break;} }
+  let tipo=null;
+  const idx=segs.findIndex(s=>SCOPE_VOCAB.has(s.toUpperCase()));
+  if(idx>0) tipo=segs[idx-1];
+  return {formato, tipo, objetivo};
 }
 function toast(msg){const t=document.getElementById('toast');document.getElementById('toastMsg').textContent=msg;t.classList.add('show');clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove('show'),2800);}
 
@@ -465,6 +521,8 @@ function processData(raw){
   map.forEach(c=>{
     c.liftDR = c.liftVals.length ? c.liftVals.reduce((a,b)=>a+b,0)/c.liftVals.length : null;
     c.name = c.names.size ? [...c.names][0] : null;
+    const tx = parseTaxonomy(c.name);
+    c.formato = tx.formato; c.tipo = tx.tipo; c.objetivo = tx.objetivo;
     c.matchCount = (c.sources.platform?1:0)+(c.sources.brandlift?1:0)+(c.sources.iiee?1:0);
     c.weekly.sort((a,b)=>(a.year||0)-(b.year||0)||(a.week||0)-(b.week||0));
     delete c.names;
@@ -478,6 +536,9 @@ function applyFilters(list){
   return list.filter(c=>{
     if(filters.year && !hasIieeInYear(c)) return false;
     if(filters.market && c.market!==filters.market) return false;
+    if(filters.objetivo && c.objetivo!==filters.objetivo) return false;
+    if(filters.formato && c.formato!==filters.formato) return false;
+    if(filters.tipo && c.tipo!==filters.tipo) return false;
     if(filters.match && c.matchCount!==+filters.match) return false;
     if(filters.bu && c.bu!==filters.bu) return false;
     if(filters.q){
@@ -629,7 +690,72 @@ function renderMarkets(list){
   }).join('');
 }
 
-/* ====================== RENDER: CAMPAIGN CARDS ====================== */
+/* ====================== RENDER: TAXONOMY ====================== */
+function groupBy(list, keyFn){
+  const m={};
+  list.forEach(c=>{
+    const k=keyFn(c)||'(sin dato)';
+    if(!m[k])m[k]={key:k,campaigns:0,impressions:0,clicks:0,iieeWeekly:0,liftSum:0,liftN:0};
+    const o=m[k];
+    o.campaigns++; o.impressions+=c.impressions; o.clicks+=c.clicks; o.iieeWeekly+=iieeFor(c);
+    if(c.liftDR!=null){o.liftSum+=c.liftDR;o.liftN++;}
+  });
+  return Object.values(m).map(o=>({...o,liftAvg:o.liftN?o.liftSum/o.liftN:null})).sort((a,b)=>b.impressions-a.impressions);
+}
+const TAXO_COLS=[{l:'Valor'},{l:'Camp.',n:1},{l:'Impresiones',n:1},{l:'Clicks',n:1},{l:'Lift DR',n:1},{l:'IIEE Total',n:1}];
+function renderTaxoTable(headId, bodyId, rows, filterKey){
+  document.getElementById(headId).innerHTML = TAXO_COLS.map(c=>`<th class="${c.n?'num':''}">${c.l}</th>`).join('');
+  document.getElementById(bodyId).innerHTML = rows.map(r=>{
+    const liftCls=r.liftAvg>=0?'lift-pos':'lift-neg';
+    const active = filters[filterKey] && filters[filterKey]===r.key;
+    return `<tr style="cursor:pointer${active?';background:var(--accent-soft)':''}" data-fkey="${filterKey}" data-fval="${r.key==='(sin dato)'?'':escapeHtml(r.key)}">
+      <td><b class="mono" style="font-size:12px">${escapeHtml(r.key)}</b></td>
+      <td class="num">${r.campaigns}</td>
+      <td class="num">${fmt(r.impressions)}</td>
+      <td class="num">${fmt(r.clicks)}</td>
+      <td class="num ${r.liftAvg!=null?liftCls:''}">${r.liftAvg!=null?fmtPct(r.liftAvg):'—'}</td>
+      <td class="num">${fmt(r.iieeWeekly)}</td></tr>`;
+  }).join('') || `<tr><td colspan="6" style="text-align:center;color:var(--muted-2);padding:24px">Sin datos</td></tr>`;
+  document.querySelectorAll('#'+bodyId+' tr[data-fkey]').forEach(tr=>tr.onclick=()=>{
+    const fk=tr.dataset.fkey, fv=tr.dataset.fval;
+    if(!fv) return;
+    filters[fk]= filters[fk]===fv ? '' : fv;
+    const sel=document.getElementById(fk+'Filter'); if(sel) sel.value=filters[fk];
+    renderAll();
+  });
+}
+function renderTaxonomy(list){
+  const obj = groupBy(list, c=>c.objetivo);
+  const fmtG = groupBy(list, c=>c.formato);
+  const tipoG = groupBy(list, c=>c.tipo);
+  document.getElementById('taxoObjMeta').textContent = `${obj.length} objetivos`;
+  // objetivo chart
+  const OBJ_COLORS={REACH:'#0E9F9F',VIEWS:'#E8910C',TRAF:'#6C5CE7',AWAR:'#E60023',CONS:'#13A574'};
+  destroy('objetivo');
+  charts.objetivo = new Chart(document.getElementById('chartObjetivo'),{
+    type:'bar',
+    data:{labels:obj.map(o=>o.key),datasets:[{label:'Impresiones',data:obj.map(o=>o.impressions),
+      backgroundColor:obj.map(o=>OBJ_COLORS[o.key]||'#9197A8'),borderRadius:6,maxBarThickness:46}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},
+      tooltip:{callbacks:{label:c=>` ${fmt(c.raw)} impresiones · ${obj[c.dataIndex].campaigns} camp.`}}},
+      scales:{y:{grid:{color:GRID},ticks:{callback:v=>fmtCompact(v)}},x:{grid:{display:false}}}}
+  });
+  // formato chart (top 10)
+  const fTop=fmtG.slice(0,10);
+  destroy('formato');
+  charts.formato = new Chart(document.getElementById('chartFormato'),{
+    type:'bar',
+    data:{labels:fTop.map(o=>o.key),datasets:[{label:'Impresiones',data:fTop.map(o=>o.impressions),backgroundColor:'#0E9F9F',borderRadius:5,maxBarThickness:18}]},
+    options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},
+      tooltip:{callbacks:{label:c=>` ${fmt(c.raw)} impresiones · ${fTop[c.dataIndex].campaigns} camp.`}}},
+      scales:{x:{grid:{color:GRID},ticks:{callback:v=>fmtCompact(v)}},y:{grid:{display:false},ticks:{font:{family:"'JetBrains Mono'",size:10}}}}}
+  });
+  renderTaxoTable('taxoObjHead','taxoObjBody',obj,'objetivo');
+  renderTaxoTable('taxoFmtHead','taxoFmtBody',fmtG.slice(0,15),'formato');
+  renderTaxoTable('taxoTipoHead','taxoTipoBody',tipoG.slice(0,15),'tipo');
+}
+
+
 function renderCampaigns(list){
   const sorted=[...list].sort((a,b)=>b.matchCount-a.matchCount || b.impressions-a.impressions);
   const grid=document.getElementById('campGrid');
@@ -655,8 +781,11 @@ function renderCampaigns(list){
           <span class="match-tag ${mtag}">${c.matchCount}/3</span>
         </div>
       </div>
-      <div style="padding:9px 17px 4px;display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--muted)">
+      <div style="padding:9px 17px 4px;display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--muted);flex-wrap:wrap">
         <i style="width:9px;height:9px;border-radius:3px;background:${col}"></i>${mkName(c.market)}
+        ${c.objetivo?`<span class="taxo-tag obj">${c.objetivo}</span>`:''}
+        ${c.formato?`<span class="taxo-tag">${escapeHtml(c.formato)}</span>`:''}
+        ${c.tipo?`<span class="taxo-tag">${escapeHtml(c.tipo)}</span>`:''}
       </div>
       <div class="ccard-metrics">
         <div class="cmetric"><div class="cm-label">Impresiones</div><div class="cm-val ${c.sources.platform?'':'muted'}">${c.sources.platform?fmtCompact(c.impressions):'—'}</div></div>
@@ -676,6 +805,8 @@ const COLS=[
   {key:'id',label:'Campaign ID',cls:'t-id'},
   {key:'name',label:'Nombre',cls:'t-name'},
   {key:'market',label:'Mercado'},
+  {key:'objetivo',label:'Objetivo'},
+  {key:'formato',label:'Formato'},
   {key:'matchCount',label:'Match',num:true},
   {key:'impressions',label:'Impresiones',num:true},
   {key:'clicks',label:'Clicks',num:true},
@@ -706,6 +837,8 @@ function renderTable(list){
       <td class="t-id">${c.id}</td>
       <td class="t-name" title="${c.name?escapeHtml(c.name):''}">${c.name?escapeHtml(c.name):'<span class="miss">—</span>'}</td>
       <td><span class="t-mkt"><i class="mdot" style="background:${mkColor(c.market)}"></i>${mkName(c.market)}</span></td>
+      <td>${c.objetivo?`<span class="taxo-tag obj">${c.objetivo}</span>`:'<span class="miss">—</span>'}</td>
+      <td class="mono" style="font-size:11.5px">${c.formato?escapeHtml(c.formato):'<span class="miss">—</span>'}</td>
       <td class="num">${c.matchCount}/3</td>
       <td class="num">${c.sources.platform?fmt(c.impressions):'<span class="miss">—</span>'}</td>
       <td class="num">${c.sources.platform?fmt(c.clicks):'<span class="miss">—</span>'}</td>
@@ -715,7 +848,7 @@ function renderTable(list){
   }).join('');
   const t=totals(sorted);
   document.getElementById('tableFoot').innerHTML=`<tr class="foot-row">
-    <td>TOTAL</td><td></td><td></td><td class="num">${sorted.length}</td>
+    <td>TOTAL</td><td></td><td></td><td></td><td></td><td class="num">${sorted.length}</td>
     <td class="num">${fmt(t.impressions)}</td><td class="num">${fmt(t.clicks)}</td>
     <td class="num">${t.liftAvg!=null?fmtPct(t.liftAvg):'—'}</td>
     <td class="num">${fmt(t.iieeWeekly)}</td></tr>`;
@@ -770,6 +903,7 @@ function renderAll(){
   renderKPIs(totals(filtered));
   renderCharts(filtered);
   renderMarkets(filtered);
+  renderTaxonomy(filtered);
   campLimit=24; renderCampaigns(filtered);
   tablePage=1; renderTable(filtered);
   renderSources();
@@ -788,12 +922,25 @@ function populateMarketFilter(){
   const ysel=document.getElementById('yearFilter');
   const years=[...new Set(CAMPAIGNS.flatMap(c=>Object.keys(c.iieeByYear)))].map(Number).filter(Boolean).sort();
   ysel.innerHTML='<option value="">Todos los años</option>'+years.map(y=>`<option value="${y}">${y}</option>`).join('');
+  // taxonomy filters
+  const fill=(id,vals,allLabel)=>{
+    const el=document.getElementById(id);
+    el.innerHTML=`<option value="">${allLabel}</option>`+vals.map(v=>`<option value="${v}">${v}</option>`).join('');
+  };
+  const uniq=(key)=>[...new Set(CAMPAIGNS.map(c=>c[key]).filter(Boolean))];
+  // objetivo by frequency-ish order, formato/tipo alphabetical
+  const objOrder=['REACH','VIEWS','TRAF','AWAR','CONS'];
+  const objs=uniq('objetivo').sort((a,b)=>{const ia=objOrder.indexOf(a),ib=objOrder.indexOf(b);return (ia<0?99:ia)-(ib<0?99:ib)||a.localeCompare(b);});
+  fill('objetivoFilter',objs,'Todos los objetivos');
+  fill('formatoFilter',uniq('formato').sort(),'Todos los formatos');
+  fill('tipoFilter',uniq('tipo').sort(),'Todos los tipos');
 }
 
 /* ====================== NAV ====================== */
 const TITLES={overview:['Vista general','Resumen consolidado de las 3 fuentes'],
   markets:['Por mercado','Métricas agregadas por SIT_SITE_ID'],
   campaigns:['Por Campaign ID','Cada ID sincronizado individualmente'],
+  taxonomy:['Formato y objetivo','Extraídos de la taxonomía del nombre'],
   table:['Tabla dinámica','Ordena, filtra y exporta'],
   data:['Fuentes y carga','Sincronización por CAMPAIGN_ID']};
 function switchView(v){
@@ -804,7 +951,7 @@ function switchView(v){
   document.getElementById('viewTitle').textContent=TITLES[v][0];
   document.getElementById('viewCrumb').textContent=TITLES[v][1];
   document.getElementById('filterBar').style.display = (v==='data')?'none':'block';
-  if(v==='overview')setTimeout(()=>Object.values(charts).forEach(c=>c.resize()),60);
+  if(v==='overview'||v==='taxonomy')setTimeout(()=>Object.values(charts).forEach(c=>c.resize()),60);
 }
 document.querySelectorAll('.nav-item').forEach(b=>b.onclick=()=>switchView(b.dataset.view));
 document.querySelectorAll('.vtab').forEach(b=>b.onclick=()=>switchView(b.dataset.view));
@@ -814,6 +961,9 @@ let qTimer;
 document.getElementById('searchInput').oninput=e=>{clearTimeout(qTimer);qTimer=setTimeout(()=>{filters.q=e.target.value.trim();renderAll();},220);};
 document.getElementById('yearFilter').onchange=e=>{filters.year=e.target.value;renderAll();};
 document.getElementById('marketFilter').onchange=e=>{filters.market=e.target.value;renderAll();};
+document.getElementById('objetivoFilter').onchange=e=>{filters.objetivo=e.target.value;renderAll();};
+document.getElementById('formatoFilter').onchange=e=>{filters.formato=e.target.value;renderAll();};
+document.getElementById('tipoFilter').onchange=e=>{filters.tipo=e.target.value;renderAll();};
 document.getElementById('matchFilter').onchange=e=>{filters.match=e.target.value;renderAll();};
 document.querySelectorAll('.chip-toggle button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('.chip-toggle button').forEach(x=>x.classList.remove('on'));
@@ -821,10 +971,9 @@ document.querySelectorAll('.chip-toggle button').forEach(b=>b.onclick=()=>{
 });
 document.getElementById('btnClearFilters').onclick=()=>{
   filters.q='';filters.year='';filters.market='';filters.match='';filters.bu='';
+  filters.objetivo='';filters.formato='';filters.tipo='';
   document.getElementById('searchInput').value='';
-  document.getElementById('yearFilter').value='';
-  document.getElementById('marketFilter').value='';
-  document.getElementById('matchFilter').value='';
+  ['yearFilter','marketFilter','matchFilter','objetivoFilter','formatoFilter','tipoFilter'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
   document.querySelectorAll('.chip-toggle button').forEach((x,i)=>x.classList.toggle('on',i===0));
   renderAll();
 };
@@ -834,6 +983,7 @@ function exportRows(){
   return applyFilters(CAMPAIGNS).map(c=>({
     CAMPAIGN_ID:c.id, Nombre:c.name||'', Mercado:mkName(c.market), Codigo_Mercado:c.market||'',
     BU:c.bu||'', Match:c.matchCount+'/3', Anio_filtro:filters.year||'Todos',
+    Objetivo:c.objetivo||'', Formato:c.formato||'', Tipo_campana:c.tipo||'',
     Impressions:c.sources.platform?c.impressions:'', Clicks:c.sources.platform?c.clicks:'',
     LIFT_DR:c.liftDR!=null?c.liftDR:'', IIEE_TOTAL:c.sources.iiee?iieeFor(c):'',
     En_Plataforma:c.sources.platform?'Sí':'No', En_BrandLift:c.sources.brandlift?'Sí':'No', En_IIEE:c.sources.iiee?'Sí':'No'
